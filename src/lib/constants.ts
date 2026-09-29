@@ -4,8 +4,11 @@ export const APP_NAME = "IntervueAI";
 
 export const ROUTES = {
   home: "/",
+  dashboard: "/dashboard",
   interviews: "/interview",
   interview: (id: string) => `/interview/${id}`,
+  signIn: "/sign-in",
+  signUp: "/sign-up",
 } as const;
 
 export const MOCK_INTERVIEWS: Interview[] = [

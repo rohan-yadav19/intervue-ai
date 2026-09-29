@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SignedInUser } from "@/components/auth/SignedInUser";
 import { MOCK_INTERVIEWS, ROUTES } from "@/lib/constants";
 import { formatRole } from "@/lib/utils";
 
@@ -23,6 +24,9 @@ export default async function InterviewSessionPage({
       <h1 className="mt-4 text-2xl font-semibold tracking-tight">
         {interview?.title ?? "Interview session"}
       </h1>
+      <div className="mt-2">
+        <SignedInUser />
+      </div>
       <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
         {interview
           ? `${formatRole(interview.role)} · ${interview.description}`
