@@ -1,1 +1,6 @@
-export type { Interview, InterviewRole, InterviewStatus } from "./interview";
+export type {
+  Interview,
+  InterviewRole,
+  InterviewStatus,
+  InterviewType,
+} from "./interview";

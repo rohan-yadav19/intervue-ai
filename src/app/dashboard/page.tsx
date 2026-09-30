@@ -1,25 +1,25 @@
-import { InterviewCard } from "@/components/interview/InterviewCard";
-import { RequireAuth } from "@/components/auth/RequireAuth";
-import { SignedInUser } from "@/components/auth/SignedInUser";
+import { DashboardWelcome } from "@/components/dashboard/DashboardWelcome";
+import { InterviewList } from "@/components/interview/InterviewList";
 import { MOCK_INTERVIEWS } from "@/lib/constants";
 
 export default function DashboardPage() {
   return (
-    <RequireAuth>
-      <section className="mx-auto w-full max-w-5xl px-4 py-12">
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <div className="mt-2">
-          <SignedInUser />
+    <section className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
+      <DashboardWelcome />
+      <section className="mt-10 sm:mt-12">
+        <div className="mb-5 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight">
+              My Interviews
+            </h2>
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+              Static practice history for now. Nothing is saved to a database
+              yet.
+            </p>
+          </div>
         </div>
-        <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-          Your mock interviews are ready when you are.
-        </p>
-        <div className="mt-8 grid gap-4 sm:grid-cols-2">
-          {MOCK_INTERVIEWS.map((interview) => (
-            <InterviewCard key={interview.id} interview={interview} />
-          ))}
-        </div>
+        <InterviewList interviews={MOCK_INTERVIEWS} />
       </section>
-    </RequireAuth>
+    </section>
   );
 }

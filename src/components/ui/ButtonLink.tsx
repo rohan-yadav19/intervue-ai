@@ -9,6 +9,7 @@ type ButtonLinkProps = {
   children: React.ReactNode;
   variant?: ButtonVariant;
   className?: string;
+  fullWidth?: boolean;
 };
 
 export function ButtonLink({
@@ -16,9 +17,10 @@ export function ButtonLink({
   children,
   variant = "primary",
   className,
+  fullWidth = false,
 }: ButtonLinkProps) {
   return (
-    <Link href={href} className={buttonClassName(variant, className)}>
+    <Link href={href} className={buttonClassName(variant, className, fullWidth)}>
       {children}
     </Link>
   );

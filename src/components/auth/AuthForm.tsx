@@ -118,7 +118,7 @@ export function AuthForm({ mode }: AuthFormProps) {
         <Button
           type="submit"
           disabled={submitting || !configured}
-          className="w-full"
+          fullWidth
         >
           {submitting
             ? "Please wait…"
@@ -134,7 +134,7 @@ export function AuthForm({ mode }: AuthFormProps) {
           variant="secondary"
           disabled={submitting || !configured}
           onClick={handleGoogleSignIn}
-          className="w-full"
+          fullWidth
         >
           Continue with Google
         </Button>

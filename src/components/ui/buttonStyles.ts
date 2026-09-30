@@ -5,9 +5,11 @@ export type ButtonVariant = "primary" | "secondary";
 export function buttonClassName(
   variant: ButtonVariant = "primary",
   className?: string,
+  fullWidth = false,
 ) {
   return cn(
-    "inline-flex h-11 w-full items-center justify-center rounded-full px-6 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto",
+    "inline-flex h-11 items-center justify-center rounded-full px-6 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+    fullWidth ? "w-full" : "w-full sm:w-auto",
     variant === "primary" &&
       "bg-indigo-600 text-white hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600",
     variant === "secondary" &&
