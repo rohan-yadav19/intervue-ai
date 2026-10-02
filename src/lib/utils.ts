@@ -19,6 +19,10 @@ export function formatInterviewType(type: string) {
   return formatLabel(type);
 }
 
+export function formatExperienceLevel(level: string) {
+  return formatLabel(level);
+}
+
 export function formatInterviewStatus(status: string) {
   return formatLabel(status.replace(/_/g, "-"));
 }

@@ -7,9 +7,29 @@ export const ROUTES = {
   dashboard: "/dashboard",
   interviews: "/interview",
   interview: (id: string) => `/interview/${id}`,
+  createInterview: "/interview/create",
   signIn: "/sign-in",
   signUp: "/sign-up",
 } as const;
+
+export const EXPERIENCE_LEVEL_OPTIONS = [
+  { value: "entry", label: "Entry" },
+  { value: "mid", label: "Mid" },
+  { value: "senior", label: "Senior" },
+] as const;
+
+export const INTERVIEW_TYPE_OPTIONS = [
+  { value: "technical", label: "Technical" },
+  { value: "behavioral", label: "Behavioral" },
+  { value: "system-design", label: "System Design" },
+  { value: "mixed", label: "Mixed" },
+] as const;
+
+export const QUESTION_COUNT_OPTIONS = [
+  { value: 5, label: "5" },
+  { value: 10, label: "10" },
+  { value: 15, label: "15" },
+] as const;
 
 export const MOCK_INTERVIEWS: Interview[] = [
   {
@@ -41,4 +61,4 @@ export const MOCK_INTERVIEWS: Interview[] = [
   },
 ];
 
-export const START_INTERVIEW_HREF = ROUTES.interview(MOCK_INTERVIEWS[0].id);
+export const START_INTERVIEW_HREF = ROUTES.createInterview;
