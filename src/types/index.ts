@@ -1,5 +1,7 @@
 export type {
   ExperienceLevel,
+  GeneratedQuestion,
+  GenerateQuestionsResponse,
   Interview,
   InterviewConfig,
   InterviewRole,

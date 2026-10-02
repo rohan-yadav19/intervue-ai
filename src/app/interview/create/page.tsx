@@ -15,8 +15,8 @@ export default function CreateInterviewPage() {
         Create New Interview
       </h1>
       <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600 sm:text-base dark:text-zinc-400">
-        Set up the role, level, and stack for this mock session. Questions will
-        be generated here later.
+        Set up the role, level, and stack — then generate AI-powered interview
+        questions with Google Gemini.
       </p>
       <div className="mt-8">
         <CreateInterviewForm />

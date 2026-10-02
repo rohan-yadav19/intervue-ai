@@ -16,6 +16,16 @@ export type InterviewConfig = {
   questionCount: QuestionCount;
 };
 
+export type GeneratedQuestion = {
+  question: string;
+  topic: string;
+};
+
+export type GenerateQuestionsResponse = {
+  interviewConfig: InterviewConfig;
+  questions: GeneratedQuestion[];
+};
+
 export type Interview = {
   id: string;
   title: string;
