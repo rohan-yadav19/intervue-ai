@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
+import { InterviewSession } from "@/components/interview/InterviewSession";
 import { SelectField } from "@/components/ui/SelectField";
 import { TextField } from "@/components/ui/TextField";
 import {
@@ -22,6 +23,7 @@ import {
 import type {
   GeneratedQuestion,
   GenerateQuestionsResponse,
+  InterviewConfig,
 } from "@/types";
 
 type FormStatus = "idle" | "loading" | "success" | "error";
@@ -37,6 +39,8 @@ export function CreateInterviewForm() {
   const [status, setStatus] = useState<FormStatus>("idle");
   const [apiError, setApiError] = useState<string | null>(null);
   const [result, setResult] = useState<GenerateQuestionsResponse | null>(null);
+  const [showSession, setShowSession] = useState(false);
+  const [sessionConfig, setSessionConfig] = useState<InterviewConfig | null>(null);
 
   function updateField<K extends keyof InterviewConfigInput>(
     field: K,
@@ -218,6 +222,59 @@ export function CreateInterviewForm() {
       {status === "success" && result && result.questions.length > 0 && (
         <div className="lg:col-span-2">
           <GeneratedQuestions questions={result.questions} />
+          {!showSession && (
+            <div className="mt-6 flex justify-center">
+              <Button
+                onClick={() => {
+                  setSessionConfig(toInterviewConfig(values));
+                  setShowSession(true);
+                }}
+                variant="primary"
+                className="gap-2 px-8"
+              >
+                <svg
+                  className="h-5 w-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"
+                  />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"
+                  />
+                </svg>
+                Start Interview Session
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Interview Session — full width below everything */}
+      {showSession && sessionConfig && result && (
+        <div className="lg:col-span-2">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-lg font-semibold tracking-tight">
+              Interview Session
+            </h2>
+            <button
+              onClick={() => setShowSession(false)}
+              className="text-sm text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-50"
+            >
+              ← Back to questions
+            </button>
+          </div>
+          <InterviewSession
+            config={sessionConfig}
+            questions={result.questions}
+          />
         </div>
       )}
     </div>
