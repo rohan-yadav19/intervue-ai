@@ -42,14 +42,41 @@ export function InterviewSession({ config, questions }: InterviewSessionProps) {
   }, [conversation]);
 
   const isIdle = status === "idle" || status === "error" || status === "ended";
-  const isConnecting = status === "connecting";
+  const isConnecting = status === "connecting" || status === "requesting-mic";
   const isActive = status === "active";
   const isEnding = status === "ending";
+
+  // Calculate progress
+  const answeredCount =
+    activeQuestionIndex >= 0 ? activeQuestionIndex : 0;
+  const progressPercent =
+    questions.length > 0
+      ? Math.round(
+          ((status === "ended"
+            ? questions.length
+            : Math.min(answeredCount + 1, questions.length)) /
+            questions.length) *
+            100,
+        )
+      : 0;
 
   return (
     <div className="space-y-6">
       {/* Status banner */}
       <StatusBanner status={status} errorMessage={errorMessage} />
+
+      {/* Progress bar */}
+      {(isActive || isEnding || status === "ended") && (
+        <ProgressBar
+          current={
+            status === "ended"
+              ? questions.length
+              : Math.min(activeQuestionIndex + 1, questions.length)
+          }
+          total={questions.length}
+          percent={progressPercent}
+        />
+      )}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]">
         {/* Left panel — Question tracker */}
@@ -70,7 +97,7 @@ export function InterviewSession({ config, questions }: InterviewSessionProps) {
                   className={cn(
                     "flex items-start gap-3 rounded-xl border p-3 text-sm transition-all duration-300",
                     isCurrent
-                      ? "border-indigo-300 bg-indigo-50/60 dark:border-indigo-800 dark:bg-indigo-950/40"
+                      ? "border-indigo-300 bg-indigo-50/60 shadow-sm shadow-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/40 dark:shadow-none"
                       : isDone
                         ? "border-green-200 bg-green-50/40 dark:border-green-900/50 dark:bg-green-950/20"
                         : "border-zinc-100 bg-zinc-50/50 dark:border-zinc-800/60 dark:bg-zinc-900/30",
@@ -118,19 +145,30 @@ export function InterviewSession({ config, questions }: InterviewSessionProps) {
               isSpeaking={isSpeaking}
               volumeLevel={volumeLevel}
             />
+
+            {/* Status text */}
             <p className="mt-4 text-sm text-zinc-500 dark:text-zinc-400">
-              {isConnecting
-                ? "Connecting…"
-                : isActive
-                  ? isSpeaking
-                    ? "Alex is speaking…"
-                    : "Listening…"
-                  : isEnding
-                    ? "Ending call…"
-                    : status === "ended"
-                      ? "Interview ended"
-                      : "Ready to start"}
+              {status === "requesting-mic"
+                ? "Requesting microphone access…"
+                : isConnecting
+                  ? "Connecting to interview…"
+                  : isActive
+                    ? isSpeaking
+                      ? "Alex is speaking…"
+                      : "Listening to your answer…"
+                    : isEnding
+                      ? "Ending call…"
+                      : status === "ended"
+                        ? "Interview ended"
+                        : "Ready to start"}
             </p>
+
+            {/* Active question badge */}
+            {isActive && activeQuestionIndex >= 0 && (
+              <p className="mt-2 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300">
+                Question {activeQuestionIndex + 1} of {questions.length}
+              </p>
+            )}
 
             {/* Controls */}
             <div className="mt-5 flex items-center gap-3">
@@ -146,7 +184,11 @@ export function InterviewSession({ config, questions }: InterviewSessionProps) {
               {isConnecting && (
                 <Button variant="secondary" disabled>
                   <LoadingDots />
-                  <span className="ml-2">Connecting…</span>
+                  <span className="ml-2">
+                    {status === "requesting-mic"
+                      ? "Checking microphone…"
+                      : "Connecting…"}
+                  </span>
                 </Button>
               )}
               {(isActive || isEnding) && (
@@ -164,12 +206,18 @@ export function InterviewSession({ config, questions }: InterviewSessionProps) {
 
           {/* Transcript */}
           <div className="rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
-            <div className="border-b border-zinc-100 px-5 py-3 dark:border-zinc-800">
+            <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-3 dark:border-zinc-800">
               <h3 className="text-sm font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
                 Live Transcript
               </h3>
+              {conversation.length > 0 && (
+                <span className="text-xs tabular-nums text-zinc-400 dark:text-zinc-500">
+                  {conversation.length}{" "}
+                  {conversation.length === 1 ? "message" : "messages"}
+                </span>
+              )}
             </div>
-            <div className="max-h-80 overflow-y-auto p-5">
+            <div className="max-h-96 overflow-y-auto p-5">
               {conversation.length === 0 ? (
                 <p className="text-center text-sm text-zinc-400 dark:text-zinc-500">
                   {isActive
@@ -227,7 +275,10 @@ function StatusBanner({
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm dark:border-red-900/50 dark:bg-red-950/30">
         <p className="font-medium text-red-700 dark:text-red-400">
-          Connection Error
+          {errorMessage.includes("microphone") ||
+          errorMessage.includes("Microphone")
+            ? "Microphone Error"
+            : "Connection Error"}
         </p>
         <p className="mt-1 text-red-600 dark:text-red-400/80">{errorMessage}</p>
       </div>
@@ -249,6 +300,35 @@ function StatusBanner({
   }
 
   return null;
+}
+
+function ProgressBar({
+  current,
+  total,
+  percent,
+}: {
+  current: number;
+  total: number;
+  percent: number;
+}) {
+  return (
+    <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex items-center justify-between text-sm">
+        <span className="font-medium text-zinc-700 dark:text-zinc-300">
+          Progress
+        </span>
+        <span className="tabular-nums font-semibold text-indigo-600 dark:text-indigo-400">
+          {current}/{total}
+        </span>
+      </div>
+      <div className="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-500 ease-out"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+    </div>
+  );
 }
 
 function VoiceOrb({

@@ -10,6 +10,7 @@ import type { GeneratedQuestion, InterviewConfig } from "@/types";
 
 export type VapiCallStatus =
   | "idle"
+  | "requesting-mic"
   | "connecting"
   | "active"
   | "ending"
@@ -67,11 +68,72 @@ RULES:
 - Ask questions exactly as written above, one at a time.
 - Wait for the candidate to finish speaking before responding.
 - Provide short, encouraging feedback after each answer.
-- After all questions are answered, give a brief summary of the candidate's performance and end the interview politely.
+- After ALL ${questions.length} questions are answered, give a brief summary of the candidate's performance and end the interview politely. Say "That concludes our interview" to signal completion.
 - Keep your responses concise and conversational — this is a voice interview.
 - Do NOT read aloud the topic labels in brackets.
 - If the candidate asks you to repeat a question, do so verbatim.
-- If the candidate says "skip", move to the next question.`;
+- If the candidate says "skip", move to the next question.
+- IMPORTANT: Always state which question number you are on before asking, like "Question 1:", "Question 2:", etc.`;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Question-index detection                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Attempts to detect which question the AI is currently asking by
+ * matching the transcript text against the list of known questions.
+ * Falls back to a regex that catches "Question N" patterns.
+ */
+function detectQuestionIndex(
+  text: string,
+  questions: GeneratedQuestion[],
+): number | null {
+  // Strategy 1: Look for "question N" pattern in the text (e.g. "Question 3:")
+  const numberMatch = text.match(/question\s+(\d+)/i);
+  if (numberMatch) {
+    const n = parseInt(numberMatch[1], 10);
+    if (n >= 1 && n <= questions.length) {
+      return n - 1; // zero-based
+    }
+  }
+
+  // Strategy 2: Fuzzy-match against question text fragments (first 40 chars)
+  for (let i = 0; i < questions.length; i++) {
+    const fragment = questions[i].question.slice(0, 50).toLowerCase();
+    if (fragment.length > 15 && text.toLowerCase().includes(fragment)) {
+      return i;
+    }
+  }
+
+  return null;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Microphone permission helper                                       */
+/* ------------------------------------------------------------------ */
+
+async function requestMicrophoneAccess(): Promise<void> {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // Immediately release the stream — Vapi will request its own
+    stream.getTracks().forEach((t) => t.stop());
+  } catch (err) {
+    const error = err as DOMException;
+    if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
+      throw new Error(
+        "Microphone permission was denied. Please allow microphone access in your browser settings and try again.",
+      );
+    }
+    if (error.name === "NotFoundError") {
+      throw new Error(
+        "No microphone was found. Please connect a microphone and try again.",
+      );
+    }
+    throw new Error(
+      `Microphone error: ${error.message || "Unable to access microphone."}`,
+    );
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -91,6 +153,8 @@ export function useVapiInterview(
 
   /** Track whether the hook is mounted to avoid state updates after unmount */
   const mountedRef = useRef(true);
+  const questionsRef = useRef(questions);
+  questionsRef.current = questions;
 
   useEffect(() => {
     return () => {
@@ -159,13 +223,15 @@ export function useVapiInterview(
             { role, text: transcript, timestamp: Date.now() },
           ]);
 
-          // Try to track which question we're on based on assistant messages
+          // Track which question we're on based on assistant speech
           if (role === "assistant") {
-            setActiveQuestionIndex((prevIndex) => {
-              // Move to next question when assistant speaks (after intro)
-              const nextIndex = prevIndex + 1;
-              return nextIndex < questions.length ? nextIndex : prevIndex;
-            });
+            const detected = detectQuestionIndex(
+              transcript,
+              questionsRef.current,
+            );
+            if (detected !== null) {
+              setActiveQuestionIndex(detected);
+            }
           }
         }
       }
@@ -193,17 +259,29 @@ export function useVapiInterview(
   /* ---- Actions ---- */
 
   const startCall = useCallback(async () => {
-    setStatus("connecting");
     setErrorMessage(null);
     setConversation([]);
     setActiveQuestionIndex(-1);
 
+    // Step 1: Request microphone permission first
+    setStatus("requesting-mic");
+    try {
+      await requestMicrophoneAccess();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Microphone access failed.";
+      setErrorMessage(message);
+      setStatus("error");
+      return;
+    }
+
+    // Step 2: Start the Vapi call
+    setStatus("connecting");
     try {
       const vapi = getVapiClient();
 
       await vapi.start({
-        name: "IntervueAI Interviewer",
-        firstMessage: `Hi there! I'm Alex, and I'll be your interviewer today. We have ${questions.length} questions prepared for a ${config.experienceLevel}-level ${config.role} ${config.type} interview. Are you ready to get started?`,
+        firstMessage: `Hi there! I'm Alex, and I'll be your interviewer today. We have ${questions.length} questions prepared for a ${config.experienceLevel}-level ${config.role} ${config.type} interview. Let's begin! Question 1: ${questions[0]?.question ?? ""}`,
         model: {
           provider: "openai",
           model: "gpt-4o",
