@@ -1,5 +1,6 @@
 import { getApp, getApps, initializeApp, type FirebaseApp } from "firebase/app";
 import { GoogleAuthProvider, getAuth, type Auth } from "firebase/auth";
+import { getFirestore, type Firestore } from "firebase/firestore";
 
 function readEnv(value: string | undefined) {
   return value?.trim() ?? "";
@@ -47,6 +48,10 @@ export function getFirebaseApp(): FirebaseApp {
 
 export function getFirebaseAuth(): Auth {
   return getAuth(getFirebaseApp());
+}
+
+export function getFirebaseDb(): Firestore {
+  return getFirestore(getFirebaseApp());
 }
 
 export function getGoogleProvider() {

@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   useVapiInterview,
   type VapiCallStatus,
+  type ConversationEntry,
 } from "@/hooks/useVapiInterview";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
@@ -16,13 +17,22 @@ import type { GeneratedQuestion, InterviewConfig } from "@/types";
 type InterviewSessionProps = {
   config: InterviewConfig;
   questions: GeneratedQuestion[];
+  /** Called once when the call ends, with the full transcript. */
+  onSessionEnd?: (
+    conversation: ConversationEntry[],
+    completedAllQuestions: boolean,
+  ) => void;
 };
 
 /* ------------------------------------------------------------------ */
 /*  Main component                                                     */
 /* ------------------------------------------------------------------ */
 
-export function InterviewSession({ config, questions }: InterviewSessionProps) {
+export function InterviewSession({
+  config,
+  questions,
+  onSessionEnd,
+}: InterviewSessionProps) {
   const {
     status,
     isSpeaking,
@@ -35,6 +45,24 @@ export function InterviewSession({ config, questions }: InterviewSessionProps) {
   } = useVapiInterview(config, questions);
 
   const transcriptEndRef = useRef<HTMLDivElement>(null);
+  /** Guard to ensure onSessionEnd fires only once per call. */
+  const sessionEndFiredRef = useRef(false);
+
+  // Reset the guard when a new call starts
+  useEffect(() => {
+    if (status === "active") {
+      sessionEndFiredRef.current = false;
+    }
+  }, [status]);
+
+  // Fire callback when the call ends
+  useEffect(() => {
+    if (status === "ended" && !sessionEndFiredRef.current) {
+      sessionEndFiredRef.current = true;
+      const completedAll = activeQuestionIndex >= questions.length - 1;
+      onSessionEnd?.(conversation, completedAll);
+    }
+  }, [status, activeQuestionIndex, questions.length, conversation, onSessionEnd]);
 
   // Auto-scroll transcript
   useEffect(() => {

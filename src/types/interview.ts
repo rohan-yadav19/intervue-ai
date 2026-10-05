@@ -35,3 +35,38 @@ export type Interview = {
   status: InterviewStatus;
   description: string;
 };
+
+/* ------------------------------------------------------------------ */
+/*  Completed interview session (stored in Firestore)                  */
+/* ------------------------------------------------------------------ */
+
+export type InterviewSessionStatus = "completed" | "abandoned";
+
+export type SessionConversationEntry = {
+  role: "assistant" | "user";
+  text: string;
+  timestamp: number;
+};
+
+export type InterviewSession = {
+  /** Firestore document ID (set after creation) */
+  id?: string;
+  /** Firebase Auth UID */
+  userId: string;
+  /** Free-text job role from the config form */
+  jobRole: string;
+  /** Experience level chosen by the user */
+  experienceLevel: ExperienceLevel;
+  /** Type of interview */
+  interviewType: InterviewType;
+  /** Comma-separated tech stack */
+  techStack: string;
+  /** The generated interview questions */
+  questions: GeneratedQuestion[];
+  /** Full conversation transcript between user & AI */
+  transcript: SessionConversationEntry[];
+  /** ISO-8601 timestamp when the session was saved */
+  completedAt: string;
+  /** Whether the user completed the full interview or ended early */
+  status: InterviewSessionStatus;
+};

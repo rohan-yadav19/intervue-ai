@@ -5,7 +5,10 @@ export type {
   Interview,
   InterviewConfig,
   InterviewRole,
+  InterviewSession,
+  InterviewSessionStatus,
   InterviewStatus,
   InterviewType,
   QuestionCount,
+  SessionConversationEntry,
 } from "./interview";

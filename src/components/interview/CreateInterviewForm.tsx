@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/components/auth/AuthProvider";
 import { Button } from "@/components/ui/Button";
 import { InterviewSession } from "@/components/interview/InterviewSession";
 import { SelectField } from "@/components/ui/SelectField";
@@ -9,6 +11,7 @@ import {
   EXPERIENCE_LEVEL_OPTIONS,
   INTERVIEW_TYPE_OPTIONS,
   QUESTION_COUNT_OPTIONS,
+  ROUTES,
 } from "@/lib/constants";
 import {
   EMPTY_INTERVIEW_CONFIG,
@@ -16,6 +19,7 @@ import {
   validateInterviewConfig,
   type InterviewConfigInput,
 } from "@/lib/interview-config";
+import { saveInterviewSession } from "@/lib/interview-sessions";
 import {
   formatExperienceLevel,
   formatInterviewType,
@@ -24,11 +28,16 @@ import type {
   GeneratedQuestion,
   GenerateQuestionsResponse,
   InterviewConfig,
+  InterviewSession as InterviewSessionType,
 } from "@/types";
+import type { ConversationEntry } from "@/hooks/useVapiInterview";
 
 type FormStatus = "idle" | "loading" | "success" | "error";
 
 export function CreateInterviewForm() {
+  const router = useRouter();
+  const { user } = useAuth();
+
   const [values, setValues] = useState<InterviewConfigInput>(
     EMPTY_INTERVIEW_CONFIG,
   );
@@ -41,6 +50,49 @@ export function CreateInterviewForm() {
   const [result, setResult] = useState<GenerateQuestionsResponse | null>(null);
   const [showSession, setShowSession] = useState(false);
   const [sessionConfig, setSessionConfig] = useState<InterviewConfig | null>(null);
+
+  /* ---- Session save state ---- */
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  /* ---- Handle session end: build object → save → redirect ---- */
+  const handleSessionEnd = useCallback(
+    async (conversation: ConversationEntry[], completedAllQuestions: boolean) => {
+      if (!user || !sessionConfig || !result) return;
+
+      setIsSaving(true);
+      setSaveError(null);
+
+      const session: InterviewSessionType = {
+        userId: user.uid,
+        jobRole: sessionConfig.role,
+        experienceLevel: sessionConfig.experienceLevel,
+        interviewType: sessionConfig.type,
+        techStack: sessionConfig.techStack,
+        questions: result.questions,
+        transcript: conversation.map((entry) => ({
+          role: entry.role,
+          text: entry.text,
+          timestamp: entry.timestamp,
+        })),
+        completedAt: new Date().toISOString(),
+        status: completedAllQuestions ? "completed" : "abandoned",
+      };
+
+      try {
+        const docId = await saveInterviewSession(session);
+        router.push(ROUTES.interviewResult(docId));
+      } catch (err) {
+        console.error("Failed to save interview session:", err);
+        const message =
+          err instanceof Error ? err.message : "Failed to save interview session.";
+        setSaveError(message);
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [user, sessionConfig, result, router],
+  );
 
   function updateField<K extends keyof InterviewConfigInput>(
     field: K,
@@ -274,7 +326,37 @@ export function CreateInterviewForm() {
           <InterviewSession
             config={sessionConfig}
             questions={result.questions}
+            onSessionEnd={handleSessionEnd}
           />
+
+          {/* Saving indicator */}
+          {isSaving && (
+            <div className="mt-4 flex items-center gap-3 rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm dark:border-indigo-900/50 dark:bg-indigo-950/30">
+              <svg
+                className="h-5 w-5 animate-spin text-indigo-600"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+              <span className="font-medium text-indigo-700 dark:text-indigo-300">
+                Saving your interview session…
+              </span>
+            </div>
+          )}
+
+          {/* Save error */}
+          {saveError && (
+            <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm dark:border-red-900/50 dark:bg-red-950/30">
+              <p className="font-medium text-red-700 dark:text-red-400">
+                Failed to save session
+              </p>
+              <p className="mt-1 text-red-600 dark:text-red-400/80">{saveError}</p>
+            </div>
+          )}
         </div>
       )}
     </div>
