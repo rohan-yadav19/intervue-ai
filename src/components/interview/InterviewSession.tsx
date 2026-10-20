@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef } from "react";
 import {
   useVapiInterview,
   type VapiCallStatus,
@@ -9,6 +9,14 @@ import {
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
 import type { GeneratedQuestion, InterviewConfig } from "@/types";
+
+/** Format a unix ms timestamp as HH:MM */
+function formatTime(ms: number) {
+  return new Date(ms).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 /* ------------------------------------------------------------------ */
 /*  Props                                                              */
@@ -47,22 +55,41 @@ export function InterviewSession({
   const transcriptEndRef = useRef<HTMLDivElement>(null);
   /** Guard to ensure onSessionEnd fires only once per call. */
   const sessionEndFiredRef = useRef(false);
+  /**
+   * Snapshot of the conversation at the exact moment the call ended.
+   * We capture this separately so the "ended" effect doesn't re-fire
+   * every time a late transcript message arrives after the call closes.
+   */
+  const endedConversationRef = useRef<ConversationEntry[]>([]);
+  const endedQuestionIndexRef = useRef(-1);
 
-  // Reset the guard when a new call starts
+  // Reset guard + capture snapshot when status transitions
   useEffect(() => {
     if (status === "active") {
       sessionEndFiredRef.current = false;
+      endedConversationRef.current = [];
+      endedQuestionIndexRef.current = -1;
     }
+    if (status === "ended" && !sessionEndFiredRef.current) {
+      // Capture the current values at the moment ending is detected
+      endedConversationRef.current = conversation;
+      endedQuestionIndexRef.current = activeQuestionIndex;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
 
-  // Fire callback when the call ends
+  // Fire callback when the call ends — deliberately NOT listing conversation/activeQuestionIndex
+  // as deps so this only runs once when status flips to "ended".
   useEffect(() => {
     if (status === "ended" && !sessionEndFiredRef.current) {
       sessionEndFiredRef.current = true;
-      const completedAll = activeQuestionIndex >= questions.length - 1;
-      onSessionEnd?.(conversation, completedAll);
+      const snap = endedConversationRef.current;
+      const snapIdx = endedQuestionIndexRef.current;
+      const completedAll = snapIdx >= questions.length - 1;
+      onSessionEnd?.(snap, completedAll);
     }
-  }, [status, activeQuestionIndex, questions.length, conversation, onSessionEnd]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
 
   // Auto-scroll transcript
   useEffect(() => {
@@ -88,6 +115,26 @@ export function InterviewSession({
         )
       : 0;
 
+  // Derive a human-readable status label
+  const statusLabel = (() => {
+    if (status === "requesting-mic") return "Requesting microphone access…";
+    if (status === "connecting") return "Connecting to interview…";
+    if (status === "ending") return "Ending interview…";
+    if (status === "ended") return "Interview complete";
+    if (status === "error") return "Connection error";
+    if (!isActive) return "Ready to start";
+    // active
+    if (isSpeaking) return "Alex is speaking…";
+    // If user just spoke and we're waiting for assistant reply
+    const lastEntry = conversation[conversation.length - 1];
+    if (lastEntry?.role === "user") return "Processing your response…";
+    return "Listening to your answer…";
+  })();
+
+  // Currently active question object (null during intro)
+  const activeQuestion =
+    activeQuestionIndex >= 0 ? questions[activeQuestionIndex] : null;
+
   return (
     <div className="space-y-6">
       {/* Status banner */}
@@ -104,6 +151,23 @@ export function InterviewSession({
           total={questions.length}
           percent={progressPercent}
         />
+      )}
+
+      {/* Current question callout — shown when a question is active */}
+      {(isActive || isEnding) && activeQuestion && (
+        <div className="rounded-2xl border border-indigo-200 bg-indigo-50/60 p-5 dark:border-indigo-800/60 dark:bg-indigo-950/30">
+          <div className="flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold text-white">
+              {activeQuestionIndex + 1}
+            </span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+              Current Question · {activeQuestion.topic}
+            </span>
+          </div>
+          <p className="mt-2 text-sm font-medium leading-relaxed text-zinc-800 dark:text-zinc-100">
+            {activeQuestion.question}
+          </p>
+        </div>
       )}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]">
@@ -176,22 +240,15 @@ export function InterviewSession({
 
             {/* Status text */}
             <p className="mt-4 text-sm text-zinc-500 dark:text-zinc-400">
-              {status === "requesting-mic"
-                ? "Requesting microphone access…"
-                : isConnecting
-                  ? "Connecting to interview…"
-                  : isActive
-                    ? isSpeaking
-                      ? "Alex is speaking…"
-                      : "Listening to your answer…"
-                    : isEnding
-                      ? "Ending call…"
-                      : status === "ended"
-                        ? "Interview ended"
-                        : "Ready to start"}
+              {statusLabel}
             </p>
 
-            {/* Active question badge */}
+            {/* Question counter badge — only during intro (before first Q detected) */}
+            {isActive && activeQuestionIndex < 0 && (
+              <p className="mt-2 rounded-full bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                Introduction in progress
+              </p>
+            )}
             {isActive && activeQuestionIndex >= 0 && (
               <p className="mt-2 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300">
                 Question {activeQuestionIndex + 1} of {questions.length}
@@ -221,6 +278,7 @@ export function InterviewSession({
               )}
               {(isActive || isEnding) && (
                 <Button
+                  id="end-interview-btn"
                   onClick={stopCall}
                   variant="secondary"
                   disabled={isEnding}
@@ -236,7 +294,7 @@ export function InterviewSession({
           <div className="rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
             <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-3 dark:border-zinc-800">
               <h3 className="text-sm font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                Live Transcript
+                {status === "ended" ? "Full Transcript" : "Live Transcript"}
               </h3>
               {conversation.length > 0 && (
                 <span className="text-xs tabular-nums text-zinc-400 dark:text-zinc-500">
@@ -249,7 +307,7 @@ export function InterviewSession({
               {conversation.length === 0 ? (
                 <p className="text-center text-sm text-zinc-400 dark:text-zinc-500">
                   {isActive
-                    ? "Waiting for speech…"
+                    ? "Waiting for first message…"
                     : "Transcript will appear here once the interview starts."}
                 </p>
               ) : (
@@ -264,16 +322,31 @@ export function InterviewSession({
                     >
                       <div
                         className={cn(
-                          "max-w-[85%] rounded-xl px-3.5 py-2.5",
+                          "max-w-[85%] rounded-xl px-3.5 py-2.5 transition-opacity duration-150",
                           entry.role === "assistant"
                             ? "bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200"
                             : "bg-indigo-600 text-white",
+                          entry.isPartial && "opacity-70",
                         )}
                       >
-                        <span className="mb-0.5 block text-xs font-semibold opacity-70">
-                          {entry.role === "assistant" ? "Alex (AI)" : "You"}
+                        <div className="mb-1 flex items-center gap-2">
+                          <span className="text-xs font-semibold opacity-70">
+                            {entry.role === "assistant" ? "Interviewer" : "You"}
+                          </span>
+                          <span className="text-[10px] opacity-50">
+                            {formatTime(entry.timestamp)}
+                          </span>
+                          {entry.isPartial && (
+                            <span className="inline-flex items-center gap-0.5 opacity-60">
+                              <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:0ms]" />
+                              <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:150ms]" />
+                              <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:300ms]" />
+                            </span>
+                          )}
+                        </div>
+                        <span className={cn(entry.isPartial && "italic")}>
+                          {entry.text}
                         </span>
-                        {entry.text}
                       </div>
                     </div>
                   ))}

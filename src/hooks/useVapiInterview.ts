@@ -21,6 +21,8 @@ export type ConversationEntry = {
   role: "assistant" | "user";
   text: string;
   timestamp: number;
+  /** True while the transcript is still streaming (partial). Becomes false on final. */
+  isPartial?: boolean;
 };
 
 export type UseVapiInterviewReturn = {
@@ -156,6 +158,13 @@ export function useVapiInterview(
   const questionsRef = useRef(questions);
   questionsRef.current = questions;
 
+  // Stable ref for config — lets startCall read latest config without being recreated
+  const configRef = useRef(config);
+  configRef.current = config;
+
+  // Guard: true while a Vapi call is active (prevents double-start in React Strict Mode)
+  const callActiveRef = useRef(false);
+
   useEffect(() => {
     return () => {
       mountedRef.current = false;
@@ -168,6 +177,8 @@ export function useVapiInterview(
 
     function onCallStart() {
       if (!mountedRef.current) return;
+      console.log("[Vapi] ✅ Connected — call started");
+      callActiveRef.current = true;
       setStatus("active");
       setActiveQuestionIndex(-1);
       setErrorMessage(null);
@@ -175,6 +186,8 @@ export function useVapiInterview(
 
     function onCallEnd() {
       if (!mountedRef.current) return;
+      console.log("[Vapi] 📞 Call ended");
+      callActiveRef.current = false;
       setStatus("ended");
       setIsSpeaking(false);
       setVolumeLevel(0);
@@ -197,7 +210,8 @@ export function useVapiInterview(
 
     function onError(error: unknown) {
       if (!mountedRef.current) return;
-      console.error("Vapi error:", error);
+      console.error("[Vapi] ❌ Call error:", error);
+      callActiveRef.current = false;
       const msg =
         error instanceof Error
           ? error.message
@@ -211,27 +225,133 @@ export function useVapiInterview(
     function onMessage(message: Record<string, unknown>) {
       if (!mountedRef.current) return;
 
-      // Handle transcript messages
-      if (message.type === "transcript") {
-        const role = message.role === "assistant" ? "assistant" : "user";
-        const transcriptType = message.transcriptType as string;
-        const transcript = message.transcript as string;
+      // Log every message type so we can see what Vapi actually sends
+      console.log("[Vapi] 📨 message received — type:", message.type, message);
 
-        if (transcriptType === "final" && transcript) {
-          setConversation((prev) => [
-            ...prev,
-            { role, text: transcript, timestamp: Date.now() },
-          ]);
+      /* ---- conversation-update: reliable fallback ---- */
+      // Vapi sends this after every completed exchange. It carries
+      // messagesOpenAIFormatted: Array<{role, content}> with the full history.
+      // We use it to reconcile the conversation state. This fires even when
+      // real-time `transcript` events are disabled or absent (e.g. the
+      // firstMessage utterance often skips transcript events entirely).
+      if (message.type === "conversation-update") {
+        const raw = message.messagesOpenAIFormatted as
+          | Array<{ role: string; content: string | null }>
+          | undefined;
 
-          // Track which question we're on based on assistant speech
-          if (role === "assistant") {
-            const detected = detectQuestionIndex(
-              transcript,
-              questionsRef.current,
-            );
-            if (detected !== null) {
-              setActiveQuestionIndex(detected);
+        if (Array.isArray(raw)) {
+          setConversation((prev) => {
+            // Build a deduplicated list from the server's source-of-truth.
+            // Skip system messages; keep assistant + user only.
+            const finalized: ConversationEntry[] = raw
+              .filter(
+                (m) =>
+                  (m.role === "assistant" || m.role === "user") &&
+                  typeof m.content === "string" &&
+                  m.content.trim().length > 0,
+              )
+              .map((m, idx) => ({
+                role: m.role as "assistant" | "user",
+                text: m.content as string,
+                timestamp: Date.now() + idx, // preserve order; fine for display
+                isPartial: false,
+              }));
+
+            if (finalized.length === 0) return prev;
+
+            // Merge: remove any existing partials and replace the whole list
+            // with the authoritative server version. Partials (isPartial:true)
+            // were live previews; the conversation-update is the ground truth.
+            const existingFinals = prev.filter((e) => !e.isPartial);
+
+            // If the server list is already reflected in our state, skip update
+            // to avoid a pointless re-render.
+            if (
+              existingFinals.length === finalized.length &&
+              existingFinals.every(
+                (e, i) =>
+                  e.role === finalized[i].role && e.text === finalized[i].text,
+              )
+            ) {
+              return prev;
             }
+
+            console.log(
+              `[Vapi] 🔄 conversation-update — syncing ${finalized.length} message(s) from server`,
+            );
+            return finalized;
+          });
+        }
+        return; // conversation-update handled; no further processing needed
+      }
+
+      /* ---- transcript events: live streaming previews ---- */
+      if (message.type !== "transcript") return;
+
+      const role = message.role === "assistant" ? "assistant" : "user";
+      const transcriptType = message.transcriptType as string; // "partial" | "final"
+      const transcript = message.transcript as string;
+
+      console.log(
+        `[Vapi] 📝 transcript — speaker: ${
+          role === "assistant" ? "Interviewer" : "You"
+        }, type: ${transcriptType}, text: "${(transcript ?? "").slice(0, 80)}"`,
+      );
+
+      if (!transcript) return;
+
+      if (transcriptType === "partial") {
+        // Live-update the in-progress message for this role.
+        // If the last entry in the conversation is already a partial for this role,
+        // update it in-place to avoid accumulating dozens of separate entries.
+        setConversation((prev) => {
+          const last = prev[prev.length - 1];
+          if (last && last.role === role && last.isPartial) {
+            return [
+              ...prev.slice(0, prev.length - 1),
+              { role, text: transcript, timestamp: last.timestamp, isPartial: true },
+            ];
+          }
+          // No existing partial for this role — append a new one
+          return [
+            ...prev,
+            { role, text: transcript, timestamp: Date.now(), isPartial: true },
+          ];
+        });
+      } else if (transcriptType === "final") {
+        // Finalize: find the last partial entry for this role and replace it.
+        // If no partial exists (e.g. very short utterance), just append.
+        setConversation((prev) => {
+          let lastPartialIdx = -1;
+          for (let i = prev.length - 1; i >= 0; i--) {
+            if (prev[i].role === role && prev[i].isPartial) {
+              lastPartialIdx = i;
+              break;
+            }
+          }
+
+          if (lastPartialIdx !== -1) {
+            return [
+              ...prev.slice(0, lastPartialIdx),
+              {
+                role,
+                text: transcript,
+                timestamp: prev[lastPartialIdx].timestamp,
+                isPartial: false,
+              },
+              ...prev.slice(lastPartialIdx + 1),
+            ];
+          }
+
+          // No partial found — append as a new finalized entry
+          return [...prev, { role, text: transcript, timestamp: Date.now(), isPartial: false }];
+        });
+
+        // Track which question the assistant is currently asking
+        if (role === "assistant") {
+          const detected = detectQuestionIndex(transcript, questionsRef.current);
+          if (detected !== null) {
+            setActiveQuestionIndex(detected);
           }
         }
       }
@@ -254,11 +374,18 @@ export function useVapiInterview(
       vapi.off("error", onError);
       vapi.off("message", onMessage);
     };
-  }, [questions]);
+  }, []); // ← empty deps: register once, never re-run on prop changes
+  //   All handlers read dynamic data via refs (questionsRef, mountedRef)
 
   /* ---- Actions ---- */
 
   const startCall = useCallback(async () => {
+    // Guard: prevent double-start (React Strict Mode mounts twice in dev)
+    if (callActiveRef.current) {
+      console.warn("[Vapi] startCall ignored — a call is already active");
+      return;
+    }
+
     setErrorMessage(null);
     setConversation([]);
     setActiveQuestionIndex(-1);
@@ -279,9 +406,19 @@ export function useVapiInterview(
     setStatus("connecting");
     try {
       const vapi = getVapiClient();
+      // Read latest values via refs so this callback stays stable (no deps)
+      const currentConfig = configRef.current;
+      const currentQuestions = questionsRef.current;
+
+      console.log(
+        `[Vapi] Starting call — ${currentQuestions.length} questions, role: ${currentConfig.role}`,
+      );
 
       await vapi.start({
-        firstMessage: `Hi there! I'm Alex, and I'll be your interviewer today. We have ${questions.length} questions prepared for a ${config.experienceLevel}-level ${config.role} ${config.type} interview. Let's begin! Question 1: ${questions[0]?.question ?? ""}`,
+        firstMessage: `Hi there! I'm Alex, and I'll be your interviewer today. We have ${currentQuestions.length} questions prepared for a ${currentConfig.experienceLevel}-level ${currentConfig.role} ${currentConfig.type} interview. Let's begin! Question 1: ${currentQuestions[0]?.question ?? ""}`,
+        // "transcript" is included in the SDK's default clientMessages, so no
+        // override is needed here. Both partial and final transcript events will
+        // be forwarded to this client's "message" event listener.
         model: {
           provider: "openai",
           model: "gpt-4o",
@@ -289,7 +426,7 @@ export function useVapiInterview(
           messages: [
             {
               role: "system",
-              content: buildSystemPrompt(config, questions),
+              content: buildSystemPrompt(currentConfig, currentQuestions),
             },
           ],
         },
@@ -299,21 +436,28 @@ export function useVapiInterview(
         },
       });
     } catch (err) {
-      console.error("Failed to start Vapi call:", err);
+      console.error("[Vapi] Failed to start call:", err);
       const message =
         err instanceof Error ? err.message : "Failed to start interview call.";
       setErrorMessage(message);
       setStatus("error");
+      callActiveRef.current = false;
     }
-  }, [config, questions]);
+  }, []); // stable — reads config/questions via refs, no deps needed
 
   const stopCall = useCallback(() => {
+    if (!callActiveRef.current) {
+      console.warn("[Vapi] stopCall ignored — no active call");
+      return;
+    }
+    console.log("[Vapi] Stopping call — reason: user clicked End Interview");
     setStatus("ending");
+    callActiveRef.current = false;
     try {
       const vapi = getVapiClient();
       vapi.stop();
     } catch (err) {
-      console.error("Failed to stop Vapi call:", err);
+      console.error("[Vapi] Failed to stop call:", err);
     }
   }, []);
 
