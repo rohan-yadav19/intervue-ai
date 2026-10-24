@@ -43,6 +43,27 @@ export type Interview = {
 export type InterviewSessionStatus = "completed" | "abandoned";
 
 /* ------------------------------------------------------------------ */
+/*  Interview plan (stored before the interview starts)                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Saved to Firestore when the user clicks "Start Interview Session".
+ * The /interview/[id] page reads this to load config + questions.
+ */
+export type InterviewPlan = {
+  /** Firestore document ID (set after creation) */
+  id?: string;
+  /** Firebase Auth UID of the creator */
+  userId: string;
+  /** The interview configuration chosen by the user */
+  config: InterviewConfig;
+  /** AI-generated questions for this interview */
+  questions: GeneratedQuestion[];
+  /** ISO-8601 timestamp when the plan was created */
+  createdAt: string;
+};
+
+/* ------------------------------------------------------------------ */
 /*  AI-generated feedback                                              */
 /* ------------------------------------------------------------------ */
 

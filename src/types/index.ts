@@ -5,6 +5,7 @@ export type {
   Interview,
   InterviewConfig,
   InterviewFeedback,
+  InterviewPlan,
   InterviewRole,
   InterviewSession,
   InterviewSessionStatus,

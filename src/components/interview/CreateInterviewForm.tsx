@@ -1,10 +1,9 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { Button } from "@/components/ui/Button";
-import { InterviewSession } from "@/components/interview/InterviewSession";
 import { SelectField } from "@/components/ui/SelectField";
 import { TextField } from "@/components/ui/TextField";
 import {
@@ -19,7 +18,7 @@ import {
   validateInterviewConfig,
   type InterviewConfigInput,
 } from "@/lib/interview-config";
-import { saveInterviewSession } from "@/lib/interview-sessions";
+import { saveInterviewPlan } from "@/lib/interview-plans";
 import {
   formatExperienceLevel,
   formatInterviewType,
@@ -27,10 +26,7 @@ import {
 import type {
   GeneratedQuestion,
   GenerateQuestionsResponse,
-  InterviewConfig,
-  InterviewSession as InterviewSessionType,
 } from "@/types";
-import type { ConversationEntry } from "@/hooks/useVapiInterview";
 
 type FormStatus = "idle" | "loading" | "success" | "error";
 
@@ -48,51 +44,10 @@ export function CreateInterviewForm() {
   const [status, setStatus] = useState<FormStatus>("idle");
   const [apiError, setApiError] = useState<string | null>(null);
   const [result, setResult] = useState<GenerateQuestionsResponse | null>(null);
-  const [showSession, setShowSession] = useState(false);
-  const [sessionConfig, setSessionConfig] = useState<InterviewConfig | null>(null);
 
-  /* ---- Session save state ---- */
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-
-  /* ---- Handle session end: build object → save → redirect ---- */
-  const handleSessionEnd = useCallback(
-    async (conversation: ConversationEntry[], completedAllQuestions: boolean) => {
-      if (!user || !sessionConfig || !result) return;
-
-      setIsSaving(true);
-      setSaveError(null);
-
-      const session: InterviewSessionType = {
-        userId: user.uid,
-        jobRole: sessionConfig.role,
-        experienceLevel: sessionConfig.experienceLevel,
-        interviewType: sessionConfig.type,
-        techStack: sessionConfig.techStack,
-        questions: result.questions,
-        transcript: conversation.map((entry) => ({
-          role: entry.role,
-          text: entry.text,
-          timestamp: entry.timestamp,
-        })),
-        completedAt: new Date().toISOString(),
-        status: completedAllQuestions ? "completed" : "abandoned",
-      };
-
-      try {
-        const docId = await saveInterviewSession(session);
-        router.push(ROUTES.interviewResult(docId));
-      } catch (err) {
-        console.error("Failed to save interview session:", err);
-        const message =
-          err instanceof Error ? err.message : "Failed to save interview session.";
-        setSaveError(message);
-      } finally {
-        setIsSaving(false);
-      }
-    },
-    [user, sessionConfig, result, router],
-  );
+  /* Starting the interview session */
+  const [isStarting, setIsStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
 
   function updateField<K extends keyof InterviewConfigInput>(
     field: K,
@@ -107,9 +62,7 @@ export function CreateInterviewForm() {
     const nextErrors = validateInterviewConfig(values);
     setErrors(nextErrors);
 
-    if (Object.keys(nextErrors).length > 0) {
-      return;
-    }
+    if (Object.keys(nextErrors).length > 0) return;
 
     const config = toInterviewConfig(values);
 
@@ -125,18 +78,38 @@ export function CreateInterviewForm() {
       });
 
       const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error ?? "Failed to generate questions.");
-      }
+      if (!response.ok) throw new Error(data.error ?? "Failed to generate questions.");
 
       setResult(data as GenerateQuestionsResponse);
       setStatus("success");
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Something went wrong.";
+      const message = err instanceof Error ? err.message : "Something went wrong.";
       setApiError(message);
       setStatus("error");
+    }
+  }
+
+  /** Save plan to Firestore → navigate to the interview room */
+  async function handleStartInterview() {
+    if (!user || !result) return;
+
+    setIsStarting(true);
+    setStartError(null);
+
+    try {
+      const planId = await saveInterviewPlan({
+        userId: user.uid,
+        config: toInterviewConfig(values),
+        questions: result.questions,
+        createdAt: new Date().toISOString(),
+      });
+      router.push(ROUTES.interview(planId));
+    } catch (err) {
+      console.error("Failed to save interview plan:", err);
+      setStartError(
+        err instanceof Error ? err.message : "Failed to start interview.",
+      );
+      setIsStarting(false);
     }
   }
 
@@ -216,7 +189,6 @@ export function CreateInterviewForm() {
           Interview configuration
         </h2>
 
-        {/* Loading state */}
         {status === "loading" && (
           <div className="mt-6 flex flex-col items-center gap-3 py-8">
             <LoadingSpinner />
@@ -226,7 +198,6 @@ export function CreateInterviewForm() {
           </div>
         )}
 
-        {/* Error state */}
         {status === "error" && apiError && (
           <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
             <p className="font-medium">Generation failed</p>
@@ -234,34 +205,25 @@ export function CreateInterviewForm() {
           </div>
         )}
 
-        {/* Success state — config summary + questions */}
         {status === "success" && result && (
-          <>
-            <dl className="mt-4 space-y-3 text-sm">
-              <ConfigRow label="Job role" value={result.interviewConfig.role} />
-              <ConfigRow
-                label="Experience level"
-                value={formatExperienceLevel(
-                  result.interviewConfig.experienceLevel,
-                )}
-              />
-              <ConfigRow
-                label="Interview type"
-                value={formatInterviewType(result.interviewConfig.type)}
-              />
-              <ConfigRow
-                label="Tech stack"
-                value={result.interviewConfig.techStack}
-              />
-              <ConfigRow
-                label="Number of questions"
-                value={String(result.interviewConfig.questionCount)}
-              />
-            </dl>
-          </>
+          <dl className="mt-4 space-y-3 text-sm">
+            <ConfigRow label="Job role" value={result.interviewConfig.role} />
+            <ConfigRow
+              label="Experience level"
+              value={formatExperienceLevel(result.interviewConfig.experienceLevel)}
+            />
+            <ConfigRow
+              label="Interview type"
+              value={formatInterviewType(result.interviewConfig.type)}
+            />
+            <ConfigRow label="Tech stack" value={result.interviewConfig.techStack} />
+            <ConfigRow
+              label="Number of questions"
+              value={String(result.interviewConfig.questionCount)}
+            />
+          </dl>
         )}
 
-        {/* Idle state */}
         {status === "idle" && (
           <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
             Fill out the form and click Generate Interview to create AI-powered
@@ -274,89 +236,38 @@ export function CreateInterviewForm() {
       {status === "success" && result && result.questions.length > 0 && (
         <div className="lg:col-span-2">
           <GeneratedQuestions questions={result.questions} />
-          {!showSession && (
-            <div className="mt-6 flex justify-center">
-              <Button
-                onClick={() => {
-                  setSessionConfig(toInterviewConfig(values));
-                  setShowSession(true);
-                }}
-                variant="primary"
-                className="gap-2 px-8"
-              >
-                <svg
-                  className="h-5 w-5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"
-                  />
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"
-                  />
-                </svg>
-                Start Interview Session
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
 
-      {/* Interview Session — full width below everything */}
-      {showSession && sessionConfig && result && (
-        <div className="lg:col-span-2">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold tracking-tight">
-              Interview Session
-            </h2>
-            <button
-              onClick={() => setShowSession(false)}
-              className="text-sm text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-50"
-            >
-              ← Back to questions
-            </button>
-          </div>
-          <InterviewSession
-            config={sessionConfig}
-            questions={result.questions}
-            onSessionEnd={handleSessionEnd}
-          />
-
-          {/* Saving indicator */}
-          {isSaving && (
-            <div className="mt-4 flex items-center gap-3 rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm dark:border-indigo-900/50 dark:bg-indigo-950/30">
-              <svg
-                className="h-5 w-5 animate-spin text-indigo-600"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-              </svg>
-              <span className="font-medium text-indigo-700 dark:text-indigo-300">
-                Saving your interview session…
-              </span>
-            </div>
-          )}
-
-          {/* Save error */}
-          {saveError && (
-            <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm dark:border-red-900/50 dark:bg-red-950/30">
-              <p className="font-medium text-red-700 dark:text-red-400">
-                Failed to save session
+          {/* Start interview button */}
+          <div className="mt-6 flex flex-col items-center gap-3">
+            {startError && (
+              <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
+                {startError}
               </p>
-              <p className="mt-1 text-red-600 dark:text-red-400/80">{saveError}</p>
-            </div>
-          )}
+            )}
+            <Button
+              onClick={handleStartInterview}
+              variant="primary"
+              className="gap-2 px-8"
+              disabled={isStarting || !user}
+            >
+              {isStarting ? (
+                <>
+                  <LoadingSpinner small />
+                  Preparing interview room…
+                </>
+              ) : (
+                <>
+                  <MicIcon />
+                  Start Interview Session
+                </>
+              )}
+            </Button>
+            {!user && (
+              <p className="text-sm text-zinc-500">
+                Sign in to start the interview.
+              </p>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -364,7 +275,7 @@ export function CreateInterviewForm() {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Sub-components                                                     */
+/*  Sub-components                                                      */
 /* ------------------------------------------------------------------ */
 
 function ConfigRow({ label, value }: { label: string; value: string }) {
@@ -376,11 +287,7 @@ function ConfigRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function GeneratedQuestions({
-  questions,
-}: {
-  questions: GeneratedQuestion[];
-}) {
+function GeneratedQuestions({ questions }: { questions: GeneratedQuestion[] }) {
   return (
     <section className="rounded-2xl border border-zinc-200 bg-white p-5 sm:p-6 dark:border-zinc-800 dark:bg-zinc-950">
       <h2 className="text-lg font-semibold tracking-tight">
@@ -413,10 +320,10 @@ function GeneratedQuestions({
   );
 }
 
-function LoadingSpinner() {
+function LoadingSpinner({ small = false }: { small?: boolean }) {
   return (
     <svg
-      className="h-8 w-8 animate-spin text-indigo-600"
+      className={`${small ? "h-4 w-4" : "h-8 w-8"} animate-spin text-indigo-600`}
       xmlns="http://www.w3.org/2000/svg"
       fill="none"
       viewBox="0 0 24 24"
@@ -434,6 +341,29 @@ function LoadingSpinner() {
         className="opacity-75"
         fill="currentColor"
         d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+      />
+    </svg>
+  );
+}
+
+function MicIcon() {
+  return (
+    <svg
+      className="h-5 w-5"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={2}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"
+      />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"
       />
     </svg>
   );
