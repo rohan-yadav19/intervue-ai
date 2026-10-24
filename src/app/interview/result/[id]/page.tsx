@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
+import { useAuth } from "@/components/auth/AuthProvider";
 import { ROUTES } from "@/lib/constants";
 import {
   getInterviewSession,
@@ -12,22 +13,37 @@ import {
 import type { InterviewFeedback, InterviewSession } from "@/types";
 import { cn } from "@/lib/utils";
 
+
 /* ------------------------------------------------------------------ */
 /*  Page                                                               */
 /* ------------------------------------------------------------------ */
 
+/** True when the Firestore error is a transient network/offline error. */
+function isOfflineError(err: unknown): boolean {
+  const msg =
+    (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return (
+    msg.includes("client is offline") ||
+    msg.includes("failed to get document") ||
+    msg.includes("network error") ||
+    msg.includes("unavailable")
+  );
+}
+
 export default function InterviewResultPage() {
   const params = useParams();
   const id = params.id as string;
+  const { loading: authLoading } = useAuth();
 
   const [session, setSession] = useState<InterviewSession | null>(null);
   const [feedback, setFeedback] = useState<InterviewFeedback | null>(null);
   const [loadState, setLoadState] = useState<
-    "loading" | "generating" | "ready" | "not-found" | "error"
-  >("loading");
+    "waiting-auth" | "loading" | "generating" | "ready" | "not-found" | "error" | "offline"
+  >("waiting-auth");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setLoadState("loading");
     try {
       // 1. Fetch the saved session
       const sess = await getInterviewSession(id);
@@ -82,16 +98,35 @@ export default function InterviewResultPage() {
       setLoadState("ready");
     } catch (err) {
       console.error("[ResultPage] Error:", err);
+      if (isOfflineError(err)) {
+        setLoadState("offline");
+        // Auto-retry after 3 s — the Firestore SDK needs a moment to connect.
+        setTimeout(() => load(), 3000);
+        return;
+      }
       setErrorMessage(
         err instanceof Error ? err.message : "An unexpected error occurred.",
       );
       setLoadState("error");
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  // Wait for auth to settle, then load
   useEffect(() => {
+    if (authLoading) return;
     load();
-  }, [load]);
+  }, [authLoading, load]);
+
+
+  /* ---- Waiting for auth ---- */
+  if (loadState === "waiting-auth") {
+    return (
+      <PageShell>
+        <StatusCard icon="⏳" title="Checking authentication…" description="Please wait a moment." />
+      </PageShell>
+    );
+  }
 
   /* ---- Loading ---- */
   if (loadState === "loading") {
@@ -129,6 +164,28 @@ export default function InterviewResultPage() {
     );
   }
 
+  /* ---- Offline / retrying ---- */
+  if (loadState === "offline") {
+    return (
+      <PageShell>
+        <StatusCard
+          icon="📡"
+          title="Connecting to database…"
+          description="You appear to be offline or the connection is slow. Retrying automatically…"
+          variant="warning"
+          action={
+            <button
+              onClick={() => load()}
+              className="mt-4 rounded-xl border border-amber-300 bg-white px-5 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50"
+            >
+              Retry now
+            </button>
+          }
+        />
+      </PageShell>
+    );
+  }
+
   /* ---- Error ---- */
   if (loadState === "error") {
     return (
@@ -140,7 +197,7 @@ export default function InterviewResultPage() {
           variant="error"
           action={
             <button
-              onClick={() => { setLoadState("loading"); load(); }}
+              onClick={() => load()}
               className="mt-4 rounded-xl bg-red-600 px-5 py-2 text-sm font-medium text-white hover:bg-red-700"
             >
               Try again
