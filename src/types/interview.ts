@@ -42,6 +42,44 @@ export type Interview = {
 
 export type InterviewSessionStatus = "completed" | "abandoned";
 
+/* ------------------------------------------------------------------ */
+/*  AI-generated feedback                                              */
+/* ------------------------------------------------------------------ */
+
+export type QuestionEvaluation = {
+  /** The original question text */
+  question: string;
+  /** The candidate's answer from the transcript (empty string if not answered) */
+  answer: string;
+  /** 1–10 score for this answer */
+  score: number;
+  /** Short evaluation of what was good */
+  strength: string;
+  /** Short evaluation of what could be improved */
+  improvement: string;
+};
+
+export type InterviewFeedback = {
+  /** Firestore document ID (set after creation) */
+  id?: string;
+  /** ID of the parent InterviewSession document */
+  sessionId: string;
+  /** Firebase Auth UID — for security rules */
+  userId: string;
+  /** Overall score out of 10 */
+  overallScore: number;
+  /** 2–4 high-level strength areas */
+  strengths: string[];
+  /** 2–4 high-level areas to work on */
+  weaknesses: string[];
+  /** Per-question evaluations, in question order */
+  questionEvaluations: QuestionEvaluation[];
+  /** 3–5 concrete improvement suggestions */
+  suggestions: string[];
+  /** ISO-8601 timestamp when feedback was generated */
+  generatedAt: string;
+};
+
 export type SessionConversationEntry = {
   role: "assistant" | "user";
   text: string;

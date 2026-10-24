@@ -4,11 +4,13 @@ export type {
   GenerateQuestionsResponse,
   Interview,
   InterviewConfig,
+  InterviewFeedback,
   InterviewRole,
   InterviewSession,
   InterviewSessionStatus,
   InterviewStatus,
   InterviewType,
   QuestionCount,
+  QuestionEvaluation,
   SessionConversationEntry,
 } from "./interview";
