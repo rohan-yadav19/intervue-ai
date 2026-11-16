@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { DashboardWelcome } from "@/components/dashboard/DashboardWelcome";
 import { InterviewList } from "@/components/interview/InterviewList";
@@ -29,7 +29,23 @@ export default function DashboardPage() {
   const { user, loading: authLoading } = useAuth();
   const [sessions, setSessions] = useState<InterviewSession[]>([]);
   const [loadState, setLoadState] = useState<"loading" | "ready" | "offline" | "error">("loading");
-  const [retryCount, setRetryCount] = useState(0);
+
+  const loadSessions = useCallback(async (uid: string) => {
+    setLoadState("loading");
+    try {
+      const s = await getUserSessions(uid);
+      setSessions(s);
+      setLoadState("ready");
+    } catch (err) {
+      console.error("Failed to load sessions:", err);
+      const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+      const isOffline =
+        msg.includes("client is offline") ||
+        msg.includes("network error") ||
+        msg.includes("unavailable");
+      setLoadState(isOffline ? "offline" : "error");
+    }
+  }, []);
 
   useEffect(() => {
     if (authLoading) return;
@@ -37,31 +53,8 @@ export default function DashboardPage() {
       setLoadState("ready"); // unauthenticated — show empty state
       return;
     }
-
-    setLoadState("loading");
-    getUserSessions(user.uid)
-      .then((s) => {
-        setSessions(s);
-        setLoadState("ready");
-      })
-      .catch((err) => {
-        console.error("Failed to load sessions:", err);
-        const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-        const isOffline =
-          msg.includes("client is offline") ||
-          msg.includes("network error") ||
-          msg.includes("unavailable");
-        if (isOffline) {
-          setLoadState("offline");
-          // Auto-retry after 3 s — increment retryCount to re-trigger the effect
-          setTimeout(() => setRetryCount((n) => n + 1), 3000);
-        } else {
-          setLoadState("error");
-        }
-      });
-  // retryCount intentionally included to trigger re-fetch on auto-retry
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, authLoading, retryCount]);
+    loadSessions(user.uid);
+  }, [user, authLoading, loadSessions]);
 
 
   const interviews = sessions.map(sessionToInterview);
@@ -98,13 +91,13 @@ export default function DashboardPage() {
           <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm dark:border-amber-900/50 dark:bg-amber-950/20">
             <span className="text-xl">📡</span>
             <div>
-              <p className="font-medium text-amber-800 dark:text-amber-300">Connecting to database…</p>
+              <p className="font-medium text-amber-800 dark:text-amber-300">Could not connect to database</p>
               <p className="mt-0.5 text-amber-700 dark:text-amber-400/80">
-                Retrying automatically. Check your internet connection if this persists.
+                Check your internet connection, then try again.
               </p>
             </div>
             <button
-              onClick={() => setRetryCount((n) => n + 1)}
+              onClick={() => user && loadSessions(user.uid)}
               className="ml-auto shrink-0 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50"
             >
               Retry now
@@ -113,8 +106,17 @@ export default function DashboardPage() {
         )}
 
         {loadState === "error" && (
-          <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
-            Failed to load your interview sessions. Please refresh the page.
+          <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 p-6 text-sm dark:border-red-900/50 dark:bg-red-950/30">
+            <div className="flex-1">
+              <p className="font-medium text-red-700 dark:text-red-400">Failed to load your interview sessions.</p>
+              <p className="mt-0.5 text-red-600 dark:text-red-400/80">An unexpected error occurred. Please refresh the page or try again.</p>
+            </div>
+            <button
+              onClick={() => user && loadSessions(user.uid)}
+              className="shrink-0 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 dark:border-red-800 dark:bg-transparent dark:text-red-400"
+            >
+              Try again
+            </button>
           </div>
         )}
 

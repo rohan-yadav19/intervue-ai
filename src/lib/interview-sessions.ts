@@ -9,7 +9,7 @@ import {
   query,
   where,
 } from "firebase/firestore";
-import { getFirebaseDb } from "@/lib/firebase";
+import { getFirebaseDb, warmUpFirestore, withFirestoreRetry } from "@/lib/firebase";
 import type { InterviewFeedback, InterviewSession } from "@/types";
 
 /** Firestore collections */
@@ -57,53 +57,71 @@ export async function saveFeedback(
 /**
  * Reads a single interview session by its Firestore document ID.
  * Returns null if not found.
+ *
+ * Uses warmUpFirestore() + withFirestoreRetry() to handle the race condition
+ * where the Firestore network connection hasn't been established yet.
  */
 export async function getInterviewSession(
   sessionId: string,
 ): Promise<InterviewSession | null> {
-  const db = getFirebaseDb();
-  const snap = await getDoc(doc(db, SESSIONS_COLLECTION, sessionId));
-  if (!snap.exists()) return null;
-  return { id: snap.id, ...(snap.data() as Omit<InterviewSession, "id">) };
+  await warmUpFirestore();
+  return withFirestoreRetry(async () => {
+    const db = getFirebaseDb();
+    const snap = await getDoc(doc(db, SESSIONS_COLLECTION, sessionId));
+    if (!snap.exists()) return null;
+    return { id: snap.id, ...(snap.data() as Omit<InterviewSession, "id">) };
+  });
 }
 
 /**
  * Reads all sessions for a given user, sorted newest-first.
  * @param maxResults – optional upper bound (default 50)
+ *
+ * Uses warmUpFirestore() + withFirestoreRetry() to handle the race condition
+ * where the Firestore network connection hasn't been established yet.
  */
 export async function getUserSessions(
   userId: string,
   maxResults = 50,
 ): Promise<InterviewSession[]> {
-  const db = getFirebaseDb();
-  const q = query(
-    collection(db, SESSIONS_COLLECTION),
-    where("userId", "==", userId),
-    orderBy("completedAt", "desc"),
-    limit(maxResults),
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({
-    id: d.id,
-    ...(d.data() as Omit<InterviewSession, "id">),
-  }));
+  await warmUpFirestore();
+  return withFirestoreRetry(async () => {
+    const db = getFirebaseDb();
+    const q = query(
+      collection(db, SESSIONS_COLLECTION),
+      where("userId", "==", userId),
+      orderBy("completedAt", "desc"),
+      limit(maxResults),
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({
+      id: d.id,
+      ...(d.data() as Omit<InterviewSession, "id">),
+    }));
+  });
 }
 
 /**
  * Returns existing feedback for a session if it was already generated,
  * so we don't call Gemini again on every page refresh.
+ *
+ * Uses warmUpFirestore() + withFirestoreRetry() to handle the race condition
+ * where the Firestore network connection hasn't been established yet.
  */
 export async function getFeedbackForSession(
   sessionId: string,
 ): Promise<InterviewFeedback | null> {
-  const db = getFirebaseDb();
-  const q = query(
-    collection(db, FEEDBACK_COLLECTION),
-    where("sessionId", "==", sessionId),
-    limit(1),
-  );
-  const snap = await getDocs(q);
-  if (snap.empty) return null;
-  const d = snap.docs[0];
-  return { id: d.id, ...(d.data() as Omit<InterviewFeedback, "id">) };
+  await warmUpFirestore();
+  return withFirestoreRetry(async () => {
+    const db = getFirebaseDb();
+    const q = query(
+      collection(db, FEEDBACK_COLLECTION),
+      where("sessionId", "==", sessionId),
+      limit(1),
+    );
+    const snap = await getDocs(q);
+    if (snap.empty) return null;
+    const d = snap.docs[0];
+    return { id: d.id, ...(d.data() as Omit<InterviewFeedback, "id">) };
+  });
 }

@@ -1,5 +1,5 @@
 import { addDoc, collection, doc, getDoc } from "firebase/firestore";
-import { getFirebaseDb } from "@/lib/firebase";
+import { getFirebaseDb, warmUpFirestore, withFirestoreRetry } from "@/lib/firebase";
 import type { InterviewPlan } from "@/types";
 
 const PLANS_COLLECTION = "interviewPlans";
@@ -22,12 +22,19 @@ export async function saveInterviewPlan(plan: InterviewPlan): Promise<string> {
 /**
  * Reads a single interview plan by its Firestore document ID.
  * Returns null if not found.
+ *
+ * Uses warmUpFirestore() + withFirestoreRetry() to handle the race condition
+ * where the Firestore network connection hasn't been established yet when
+ * the interview room page mounts.
  */
 export async function getInterviewPlan(
   planId: string,
 ): Promise<InterviewPlan | null> {
-  const db = getFirebaseDb();
-  const snap = await getDoc(doc(db, PLANS_COLLECTION, planId));
-  if (!snap.exists()) return null;
-  return { id: snap.id, ...(snap.data() as Omit<InterviewPlan, "id">) };
+  await warmUpFirestore();
+  return withFirestoreRetry(async () => {
+    const db = getFirebaseDb();
+    const snap = await getDoc(doc(db, PLANS_COLLECTION, planId));
+    if (!snap.exists()) return null;
+    return { id: snap.id, ...(snap.data() as Omit<InterviewPlan, "id">) };
+  });
 }

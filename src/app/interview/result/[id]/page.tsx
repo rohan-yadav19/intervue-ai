@@ -100,8 +100,6 @@ export default function InterviewResultPage() {
       console.error("[ResultPage] Error:", err);
       if (isOfflineError(err)) {
         setLoadState("offline");
-        // Auto-retry after 3 s — the Firestore SDK needs a moment to connect.
-        setTimeout(() => load(), 3000);
         return;
       }
       setErrorMessage(

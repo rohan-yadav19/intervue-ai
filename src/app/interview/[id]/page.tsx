@@ -42,12 +42,17 @@ export default function InterviewRoomPage() {
       })
       .catch((err) => {
         console.error("[InterviewRoom] Failed to load plan:", err);
+        const raw = err instanceof Error ? err.message : String(err);
+        const isOffline = raw.toLowerCase().includes("client is offline");
         setPageState({
           tag: "error",
-          message: err instanceof Error ? err.message : "Failed to load interview.",
+          message: isOffline
+            ? "Could not connect to Firestore. Check that the Cloud Firestore API is enabled at console.firebase.google.com → your project → Firestore Database."
+            : raw,
         });
       });
   }, [planId, authLoading]);
+
 
   /* ---- Handle session end: save → redirect to result ---- */
   const handleSessionEnd = useCallback(
